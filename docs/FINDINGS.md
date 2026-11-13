@@ -163,6 +163,40 @@ so the test results (F8) stand as the main condition. The open question "do CE-f
 become human-label gains when the CE is better than the retriever?" cannot be answered on
 NFCorpus. It needs a dataset where reranking clearly helps (e.g. SciFact or TREC-COVID).
 
+## F10. GPU latency (Kaggle T4): batching pays off, modestly (`results/latency_gpu_dev_70a9ca67c3`)
+
+The same harness and methods as F7. 30 dev queries, k=50, MiniLM-L-6 fp32, max_length 512,
+3 warm-up queries, median of 3 repeats, randomized job order. Priors were cross-fitted locally on
+full dev and shipped (`calibration: file`). Live GPU scores match the cache (max abs diff 0.000).
+
+CE microbenchmark (per-doc speed vs batch size 1): bs 2: 1.15×, bs 4: 1.25×, bs 8–64: ~1.21–1.26×.
+Batching helps on the GPU, unlike the CPU (F6), but saturates quickly for this small model.
+
+Per-query median wall-clock (s):
+
+| method | B=25 | B=50 | rounds (B=50) | GP overhead (B=50) |
+|---|---|---|---|---|
+| SingleStage, one batch | 0.170 | 0.346 | 1 | 0.000 |
+| SingleStage, b=1 | 0.213 | 0.394 | 50 | 0.001 |
+| MORPH-top-b, b=8 | **0.288** | **0.473** | 7 | 0.112 |
+| MORPH-KB, b=8 | 0.309 | 0.521 | 7 | 0.177 |
+| MORPH-KB, b=4 | 0.317 | 0.534 | 13 | 0.169 |
+| MORPH-KB, b=2 | 0.355 | 0.583 | 25 | 0.166 |
+| MORPH seq. (b=1) | 0.391 | 0.737 | 50 | 0.161 |
+
+* **On the GPU, batch selection cuts BoundaryMORPH latency by 26–36%** (B=50: 0.737 → 0.473 s
+  with top-b b=8), with no measurable quality loss (F5, F8).
+* The CE time of sequential MORPH (0.576 s for 50 single-doc calls, 11.5 ms/call) is higher than
+  SingleStage b=1 (7.9 ms/call) in the same number of calls. The GPU likely idles while the CPU
+  runs each GP update between calls, which batching amortizes. This is a hypothesis we have not
+  isolated.
+* GP overhead becomes a large share on the GPU (~20–35% of total), and KB costs more than top-b
+  (an extra posterior per pick). **Top-b is the fastest batch variant at equal quality.**
+* Even batched, MORPH remains slower than SingleStage (one batch). Its benefit is
+  selection quality when B < k (F8: CE-nCG +2.5 to +10 pp), not raw speed.
+* Caveat: Kaggle's host CPU (which runs the GP) differs from the laptop, so the absolute overhead
+  numbers are hardware-specific.
+
 ## Resume here (next session)
 
 ```bash
