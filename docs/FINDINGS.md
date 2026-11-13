@@ -197,6 +197,47 @@ Per-query median wall-clock (s):
 * Caveat: Kaggle's host CPU (which runs the GP) differs from the laptop, so the absolute overhead
   numbers are hardware-specific.
 
+## F11. TREC-COVID (diffuse queries; the CE beats the retriever)
+
+Setup: BEIR TREC-COVID, 171,332 docs, 50 queries (median ~480 relevant/query). These are split
+deterministically into **tune (20)** and **eval (30)**. e5-base-v2 (fp16) top-1000 pools and both CEs
+were computed on a Kaggle T4 (`configs/trec_covid.yaml`, pool cache). All decisions were made on tune.
+Eval was run once with `configs/trec_covid_eval.yaml` (calibrated prior fit on tune).
+
+**Precondition (tune):** unlike NFCorpus (F9), the CE is a better relevance signal than the retriever here.
+Full-CE minus MIPS, human nCG: bge-reranker-v2-m3 **+18.3 / +21.0 / +19.3 pp** (k = 20/50/100,
+all CIs exclude 0). MiniLM-L-6: +11.1 / +9.3 / +9.2. CE scores are well spread (v2-m3 median 0.15,
+32% > 0.5). **Primary CE: bge-reranker-v2-m3; MiniLM-L-6 is a secondary condition.**
+
+**Eval, primary CE (30 queries)**, calibrated sequential MORPH, human nCG (paired 95% bootstrap CI):
+
+| k | B | MORPH nCG | vs MIPS | vs SingleStage | vs Full-CE (1000 calls) |
+|---|---|---|---|---|---|
+| 20 | 10 | 70.3 | +14.6 [+8.8, +20.5] | +14.6 [+8.8, +20.5] | −0.5 [−7.6, +5.9] |
+| 20 | 50 | 75.4 | +19.7 [+12.8, +26.9] | +8.9 [+4.8, +13.8] | +4.6 [+0.4, +8.4] |
+| 50 | 25 | 65.2 | +16.0 [+10.9, +21.6] | +16.0 [+10.9, +21.6] | +1.0 [−1.8, +3.9] |
+| 100 | 50 | 61.1 | +14.8 [+10.1, +20.4] | +14.8 [+10.1, +20.4] | +1.5 [−1.2, +4.3] |
+
+(All 27 cells: vs MIPS +10.0 to +19.7 pp, all Holm-significant; vs Full-CE −3.3 to +4.6 pp, none significant.)
+* **The CE-fidelity gains do reach human labels when the CE is good.** With 10–50 CE calls,
+  boundary selection plus GP propagation matches ranking all 1000 docs by the CE (20–100× fewer
+  calls), and beats MIPS/SingleStage by 10–20 pp. This replicates the paper's central claim on a
+  different dataset, retriever and CE.
+* Secondary CE (MiniLM-L-6): gains shrink to +4 to +8 pp vs MIPS, and none is Holm-significant with
+  30 queries. The gain scales with CE quality, consistent with F9.
+
+**Batching on eval** (top-b/KB, b ∈ {2,4,8}, vs calibrated sequential), primary CE: human nCG mean
+Δ **−1.06 pp** across 54 cells, max |Δ| 4.0 pp, 1/54 Holm-significant, widest CI [−8.0, +4.7].
+CE-nCG mean Δ −0.40 pp, max |Δ| 2.5 pp. **No detectable loss, but with 30 queries we can only rule
+out large losses** (on the order of 5–8 pp in the noisiest cells). NFCorpus (F8, 323 queries) gives
+the tight equivalence bound (≤0.9 pp).
+
+**Acquisition rule vs random boundary sampling:** on TREC-COVID the random-boundary control is
+within −2.5 to +0.2 pp of the boundary rule (0/9 significant on human nCG). On NFCorpus it was
+4–9 pp worse (F8). Here the gain comes mostly from the calibrated prior plus GP propagation of CE
+evidence, and less from *which* boundary docs are queried. This is consistent with the paper's
+own ablation, where the acquisition rule was worth only 1.5–2.6 pp.
+
 ## Resume here (next session)
 
 ```bash

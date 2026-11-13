@@ -40,7 +40,7 @@ bootstrap 95% CIs, all queries and the ≥20-relevant "diffuse" subset), and `me
 - [x] M5a: test-split confirmation (docs/FINDINGS.md F8)
 - [x] M5b: CE pilot (F9: no CE beats e5 on deep NFCorpus pools; kept MiniLM-L-6)
 - [x] M6a: GPU latency (F10: batching cuts MORPH latency 26-36% on T4)
-- [ ] M6b: second dataset where the CE beats the retriever
+- [x] M6b: TREC-COVID (F11: with a good CE, 10-50 calls match full CE reranking; +10-20 pp nCG over MIPS)
 
 ## Results
 
