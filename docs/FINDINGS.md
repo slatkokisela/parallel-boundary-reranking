@@ -184,13 +184,13 @@ Per-query median wall-clock (s):
 | MORPH-KB, b=2 | 0.355 | 0.583 | 25 | 0.166 |
 | MORPH seq. (b=1) | 0.391 | 0.737 | 50 | 0.161 |
 
-* **On the GPU, batch selection cuts BoundaryMORPH latency by 26–36%** (B=50: 0.737 → 0.473 s
-  with top-b b=8), with no measurable quality loss (F5, F8).
+* **On the GPU, batch selection at b = 8 cuts BoundaryMORPH latency by 26–36%** (top-b: B=25
+  0.391 → 0.288 s, B=50 0.737 → 0.473 s; KB b=2 saves 21%), with no measurable quality loss (F5, F8).
 * The CE time of sequential MORPH (0.576 s for 50 single-doc calls, 11.5 ms/call) is higher than
   SingleStage b=1 (7.9 ms/call) in the same number of calls. The GPU likely idles while the CPU
   runs each GP update between calls, which batching amortizes. This is a hypothesis we have not
   isolated.
-* GP overhead becomes a large share on the GPU (~20–35% of total), and KB costs more than top-b
+* GP overhead becomes a large share on the GPU (22–42% of per-query time across methods/B), and KB costs more than top-b
   (an extra posterior per pick). **Top-b is the fastest batch variant at equal quality.**
 * Even batched, MORPH remains slower than SingleStage (one batch). Its benefit is
   selection quality when B < k (F8: CE-nCG +2.5 to +10 pp), not raw speed.
@@ -218,7 +218,8 @@ all CIs exclude 0). MiniLM-L-6: +11.1 / +9.3 / +9.2. CE scores are well spread (
 | 50 | 25 | 65.2 | +16.0 [+10.9, +21.6] | +16.0 [+10.9, +21.6] | +1.0 [−1.8, +3.9] |
 | 100 | 50 | 61.1 | +14.8 [+10.1, +20.4] | +14.8 [+10.1, +20.4] | +1.5 [−1.2, +4.3] |
 
-(All 27 cells: vs MIPS +10.0 to +19.7 pp, all Holm-significant; vs Full-CE −3.3 to +4.6 pp, none significant.)
+(All 9 (k, B) cells: vs MIPS +10.0 to +19.7 pp and vs SingleStage +8.9 to +17.1 pp, all 18 Holm-significant;
+vs Full-CE −3.3 to +4.6 pp, none significant.)
 * **The CE-fidelity gains do reach human labels when the CE is good.** With 10–50 CE calls,
   boundary selection plus GP propagation matches ranking all 1000 docs by the CE (20–100× fewer
   calls), and beats MIPS/SingleStage by 10–20 pp. This replicates the paper's central claim on a
