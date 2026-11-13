@@ -1,0 +1,41 @@
+# M3b: calibrated rank prior (extension) x batching. All tuning on dev; test only for frozen configs.
+name: batch_calib
+seed: 0
+split: dev
+max_queries: null
+dataset: {name: nfcorpus, data_dir: data/raw}
+cache_dir: cache
+results_dir: results
+pool_size: 1000
+retriever:
+  model: intfloat/e5-base-v2
+  query_prefix: "query: "
+  doc_prefix: "passage: "
+  batch_size: 64
+cross_encoder:
+  model: cross-encoder/ms-marco-MiniLM-L-6-v2
+  max_length: 512
+  batch_size: 32
+eval:
+  k: [20, 50, 100]
+  budgets: [10, 25, 50]
+  ndcg_k: 10
+  diffuse_min_rel: 20
+calibration: {mode: crossfit, folds: 2}   # test runs: {mode: split, fit_split: dev}
+methods:
+  - {name: mips}
+  - {name: single_stage}
+  - {name: full_ce}
+  # paper prior (reference)
+  - {name: morph, batch_size: 1}
+  # calibrated prior
+  - {name: morph, batch_size: 1, prior: calibrated}
+  - {name: morph_topb, batch_size: 2, prior: calibrated}
+  - {name: morph_topb, batch_size: 4, prior: calibrated}
+  - {name: morph_topb, batch_size: 8, prior: calibrated}
+  - {name: morph_kb, batch_size: 2, prior: calibrated}
+  - {name: morph_kb, batch_size: 4, prior: calibrated}
+  - {name: morph_kb, batch_size: 8, prior: calibrated}
+  - {name: morph_kb, batch_size: 4, prior: calibrated, fantasy: pessimistic}
+  - {name: morph_random_boundary, batch_size: 4, prior: calibrated}
+  - {name: morph, batch_size: 1, prior: calibrated, acquisition: max_sigma}

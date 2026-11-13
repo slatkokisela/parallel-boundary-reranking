@@ -1,0 +1,46 @@
+# M3: batch BoundaryMORPH variants and ablations. All tuning on dev; test only for frozen configs.
+name: batch
+seed: 0
+split: dev
+max_queries: null
+dataset: {name: nfcorpus, data_dir: data/raw}
+cache_dir: cache
+results_dir: results
+pool_size: 1000
+retriever:
+  model: intfloat/e5-base-v2
+  query_prefix: "query: "
+  doc_prefix: "passage: "
+  batch_size: 64
+cross_encoder:
+  model: cross-encoder/ms-marco-MiniLM-L-6-v2
+  max_length: 512
+  batch_size: 32
+eval:
+  k: [20, 50, 100]
+  budgets: [10, 25, 50]
+  ndcg_k: 10
+  diffuse_min_rel: 20
+methods:
+  # baselines
+  - {name: mips}
+  - {name: single_stage}
+  - {name: full_ce}
+  # sequential BoundaryMORPH (paper)
+  - {name: morph, batch_size: 1}
+  # batch variants
+  - {name: morph_topb, batch_size: 2}
+  - {name: morph_topb, batch_size: 4}
+  - {name: morph_topb, batch_size: 8}
+  - {name: morph_kb, batch_size: 2}
+  - {name: morph_kb, batch_size: 4}
+  - {name: morph_kb, batch_size: 8}
+  - {name: morph_random_boundary, batch_size: 2}
+  - {name: morph_random_boundary, batch_size: 4}
+  - {name: morph_random_boundary, batch_size: 8}
+  # fantasy-value ablation (kriging liar)
+  - {name: morph_kb, batch_size: 4, fantasy: pessimistic}
+  - {name: morph_kb, batch_size: 4, fantasy: optimistic}
+  # paper ablations (sequential)
+  - {name: morph, batch_size: 1, use_prior: false}
+  - {name: morph, batch_size: 1, acquisition: max_sigma}

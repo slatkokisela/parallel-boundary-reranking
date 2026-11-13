@@ -1,0 +1,125 @@
+# Findings log (dev split only, so far)
+
+All numbers come from result directories under `results/`. Nothing here was computed by hand.
+Every result so far is **dev**. Test has not been evaluated.
+
+Setup: BEIR NFCorpus dev (324 queries with ≥1 positive). Pool: top-1000 by
+`intfloat/e5-base-v2` MIPS. CE: `cross-encoder/ms-marco-MiniLM-L-6-v2` (sigmoid,
+max_length 512), scored once on a Kaggle T4 (fp32) and replayed through a budget-enforcing oracle.
+
+## F1. This CE is weaker than the retriever on NFCorpus (`results/baselines_dev_33f4df77b5`)
+
+| k | MIPS nCG | Full-CE nCG (rank whole pool by CE) |
+|---|---|---|
+| 20 | 34.3 | 33.7 |
+| 50 | 39.0 | 36.6 |
+| 100 | 46.2 | 43.0 |
+
+Any method that approximates the CE's top-k is therefore capped on human labels. This is
+why CE-nCG (selection fidelity w.r.t. the CE) and nCG (end quality) are reported separately.
+A pilot with stronger CEs is running (model selection on dev).
+
+## F2. SingleStage does nothing once B ≤ k
+
+It reranks the MIPS top-B, which already lie inside the top-k, so the selected *set* is
+identical to MIPS (k=50 and k=100, all B: same CE-nCG and nCG as MIPS). This reproduces
+the motivation of BoundaryMORPH.
+
+## F3. The paper's percentile prior is not invariant to CE score scale (`results/batch_dev_32f2998ec0`)
+
+This CE's sigmoid scores are extremely skewed (40 dev queries: median 0.0000, p99 0.026,
+0.4% > 0.5). The paper's prior μ0 = (N−1−pos)/(N−1) lies far above these values.
+* Seq. MORPH at k=20, B=10 has CE-nCG **73.4 < 74.6 for MIPS with zero CE calls**.
+* The max-σ ablation **degrades as budget grows** (k=20: 61.8 → 47.8 → 35.9 for B = 10/25/50).
+* Diagnosis (40 queries): in the max-σ run, unscored docs in the final set had posterior
+  mean − true CE = **+0.66** on average. Scored docs (shown at their true, low CE)
+  lose to unscored docs with inflated μ, so even genuinely relevant scored docs get ejected.
+
+## F4. Calibrated rank prior (our extension) fixes F3 (`results/batch_calib_dev_04a2d7e8d4`)
+
+μ0(pos) = E[CE | MIPS rank = pos], isotonic (PAV), **cross-fitted over 2 query folds**
+(each query's prior is fit on the other fold, which a unit test checks). It uses only CE
+scores and ranks, never qrels.
+
+| CE-nCG % | MIPS | SingleStage | MORPH, paper prior | MORPH, calibrated |
+|---|---|---|---|---|
+| k=20, B=10 | 74.6 | 74.6 | 73.4 | 76.0 |
+| k=20, B=25 | 74.6 | 77.2 | 78.6 | 79.9 |
+| k=50, B=25 | 80.0 | 80.0 | 82.0 | 81.5 |
+| k=100, B=50 | 84.1 | 84.1 | 86.1 | 86.2 |
+
+* Max-σ with the calibrated prior is now flat (74.7 / 74.9 / 75.2 at k=20). It no longer collapses.
+* Human nCG at k=20: calibrated MORPH 34.9 / 35.8 / 36.1 (B = 10/25/50) vs MIPS 34.3 and
+  Full-CE 33.7. Combining the retrieval prior with sparse CE evidence beats either alone here.
+  At k=100, all CE-based methods stay ≤ MIPS (F1).
+
+## F5. Batch selection costs no measurable quality (same run)
+
+Paired against calibrated sequential MORPH, over all 63 (variant ∈ {top-b, KB-mean}, b ∈ {2,4,8}, B, k) cells:
+* CE-nCG: |Δ| ≤ **0.87 pp** (widest bootstrap 95% CI [0.08, 1.83]).
+* Human nCG: |Δ| ≤ **0.80 pp**, **0 of 63** significant after Holm.
+* Control, random sampling in the boundary band (b=4): **−3 to −9 pp**, significant in every
+  cell. The boundary-uncertainty rule, not "spending calls near the cut", produces the gain.
+* Fantasy ablation: the pessimistic kriging liar is slightly worse than the mean fantasy (−0.1 to −0.6 pp).
+* Statistics note: Wilcoxon flags some 0.03–0.4 pp CE-nCG deltas because of many tied
+  per-query differences. We treat bootstrap CIs and effect sizes as the primary evidence.
+
+## F6. On this CPU, batching makes CE inference slower per document (`results/latency_dev_663e55587d/microbench.csv`)
+
+Setup: MiniLM-L-6 CE, max_length 512, 4 torch threads, Ryzen 7 5825U laptop. The same 32
+random pool docs × 3 queries are split into calls of size bs; medians over 5 repeats.
+
+| batch size | s / call | s / doc | per-doc speed vs bs=1 |
+|---|---|---|---|
+| 1 | 0.057 | 0.057 | 1.00× |
+| 2 | 0.134 | 0.067 | 0.86× |
+| 4 | 0.305 | 0.076 | 0.74× |
+| 8 | 0.708 | 0.089 | 0.68× |
+| 16 | 1.418 | 0.089 | 0.64× |
+| 32 | 2.809 | 0.088 | 0.65× |
+
+A single sequence already saturates the threads, and batched sequences are padded to the
+longest doc in the call. **Fewer rounds therefore do not translate into lower latency on
+this hardware.** The latency benefit of batch selection depends on an accelerator (or a
+remote CE service with per-request overhead), where batch throughput scales. This has to
+be measured there, not assumed. The end-to-end per-query timings are in the same run directory.
+
+## F7. End-to-end CPU latency: sequential is fastest here (`results/latency_dev_663e55587d/summary.csv`)
+
+15 dev queries, k=50, live CE, 4 threads, 2 warm-up queries discarded, randomized job order,
+median over 2 repeats. Per-query median wall-clock (s):
+
+| method | B=25 | B=50 | rounds (B=50) | GP overhead (B=50) |
+|---|---|---|---|---|
+| SingleStage, b=1 | 1.36 | 2.91 | 50 | ~0 |
+| MORPH seq. (b=1) | 1.55 | 2.93 | 50 | 0.16 |
+| MORPH-KB b=2 | 1.83 | 3.37 | 25 | 0.14 |
+| MORPH-KB b=4 | 2.02 | 3.85 | 13 | 0.14 |
+| MORPH-KB b=8 | 2.13 | 4.10 | 7 | 0.11 |
+| SingleStage, one batch | 2.22 | 4.70 | 1 | 0 |
+
+* On CPU, wall-clock is dominated by CE compute, which batching *increases* (F6). Cutting
+  rounds 7× (b=8) makes queries ~40% *slower*.
+* BoundaryMORPH's GP overhead is small: ~0.1–0.16 s/query, ≈5% of total at N=1000, B=50.
+* Live CPU scores match the GPU-computed cache (max abs diff rounds to 0.000).
+* Conclusion so far: batch selection keeps quality (F5) but pays off in latency only where
+  batched CE throughput scales (GPU or a remote CE service). Next step: rerun this harness
+  on a Kaggle T4.
+
+## Resume here (next session)
+
+```bash
+# 1. CE pilot (private Kaggle kernel; dev only, fp16). Fetch and unzip into the repo root:
+.venv-pbar/Scripts/kaggle kernels status bojanabiga/pbar-ce-pilot
+.venv-pbar/Scripts/kaggle kernels output bojanabiga/pbar-ce-pilot -p dl/ && python -I -c "import zipfile; zipfile.ZipFile('dl/cache.zip').extractall('.')"
+#    Compare Full-CE vs MIPS nCG on dev per CE (configs/baselines.yaml with cross_encoder.model
+#    and fp16: true). Pick a CE on DEV only. If one is chosen, its test scores need another Kaggle run.
+# 2. Frozen test run (once; calibration fitted on dev):
+.venv-pbar/Scripts/python.exe scripts/run.py configs/final_test.yaml --workers 4
+.venv-pbar/Scripts/python.exe scripts/analyze.py results/final_test_<hash> --metric ce_ncg --ref 'morph|{"batch_size": 1, "prior": "calibrated"}'
+```
+
+## Open
+* Latency: does cutting rounds by b× actually reduce wall-clock time on CPU? (M4, running)
+* Does F5 hold with a stronger, better-calibrated CE? (pilot running on Kaggle)
+* Test-split confirmation with frozen configs (calibration fit on dev).
