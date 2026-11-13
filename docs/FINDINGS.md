@@ -243,8 +243,8 @@ own ablation, where the acquisition rule was worth only 1.5–2.6 pp.
 
 ```bash
 # 1. CE pilot (private Kaggle kernel; dev only, fp16). Fetch and unzip into the repo root:
-.venv-pbar/Scripts/kaggle kernels status bojanabiga/pbar-ce-pilot
-.venv-pbar/Scripts/kaggle kernels output bojanabiga/pbar-ce-pilot -p dl/ && python -I -c "import zipfile; zipfile.ZipFile('dl/cache.zip').extractall('.')"
+.venv-pbar/Scripts/kaggle kernels status <kaggle-user>/pbar-ce-pilot
+.venv-pbar/Scripts/kaggle kernels output <kaggle-user>/pbar-ce-pilot -p dl/ && python -I -c "import zipfile; zipfile.ZipFile('dl/cache.zip').extractall('.')"
 #    Compare Full-CE vs MIPS nCG on dev per CE (configs/baselines.yaml with cross_encoder.model
 #    and fp16: true). Pick a CE on DEV only. If one is chosen, its test scores need another Kaggle run.
 # 2. Frozen test run: DONE 2026-11-12 (F8). Do not re-run with changed settings.
