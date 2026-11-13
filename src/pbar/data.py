@@ -72,7 +72,18 @@ def _read_jsonl(path: Path):
                 yield json.loads(line)
 
 
-def load(name: str, data_dir: str | Path) -> Dataset:
+def make_query_split(qrels_src: dict, tune_frac: float, seed: int = 0) -> tuple[dict, dict]:
+    """Deterministic tune/eval partition of one qrels split: order qids by crc32(seed:qid) and put
+    the first round(tune_frac*n) in tune. Used when a dataset ships only a test split."""
+    import zlib
+    qids = sorted(qrels_src, key=lambda q: (zlib.crc32(f"{seed}:{q}".encode()), q))
+    n_tune = round(tune_frac * len(qids))
+    tune = {q: qrels_src[q] for q in qids[:n_tune]}
+    return tune, {q: qrels_src[q] for q in qids[n_tune:]}
+
+
+def load(name: str, data_dir: str | Path, split_scheme: dict | None = None) -> Dataset:
+    """split_scheme, e.g. {source: test, tune_frac: 0.4, seed: 0}, adds 'tune' and 'eval' splits."""
     root = download(name, Path(data_dir))
     doc_ids, doc_texts = [], []
     for row in _read_jsonl(root / "corpus.jsonl"):
@@ -93,4 +104,7 @@ def load(name: str, data_dir: str | Path) -> Dataset:
                 qid, did, grade = line.rstrip("\n").split("\t")
                 split_q.setdefault(qid, {})[did] = int(grade)
         qrels[split] = split_q
+    if split_scheme:
+        qrels["tune"], qrels["eval"] = make_query_split(
+            qrels[split_scheme["source"]], split_scheme["tune_frac"], split_scheme.get("seed", 0))
     return Dataset(name, doc_ids, doc_texts, queries, qrels)

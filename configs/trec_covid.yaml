@@ -1,0 +1,44 @@
+# Second dataset: BEIR TREC-COVID (diffuse queries, ~480 relevant/query; the paper's regime).
+# Only a test split exists, so its 50 queries are split deterministically into tune (20) and eval (30).
+# Tune on `tune`; run `eval` once with a frozen config (calibration fit on tune).
+name: trec_covid
+seed: 0
+split: tune
+max_queries: null
+dataset:
+  name: trec-covid
+  data_dir: data/raw
+  split_scheme: {source: test, tune_frac: 0.4, seed: 0}
+cache_dir: cache
+results_dir: results
+pool_size: 1000
+pool_cache: {n: 1010}       # 171k-doc corpus: ship only pool-level embeddings (built on GPU)
+retriever:
+  model: intfloat/e5-base-v2
+  query_prefix: "query: "
+  doc_prefix: "passage: "
+  batch_size: 128
+  fp16: true
+cross_encoder:
+  model: cross-encoder/ms-marco-MiniLM-L-6-v2
+  max_length: 512
+  batch_size: 32
+eval:
+  k: [20, 50, 100]
+  budgets: [10, 25, 50]
+  ndcg_k: 10
+  diffuse_min_rel: 20
+calibration: {mode: crossfit, folds: 2}
+methods:
+  - {name: mips}
+  - {name: single_stage}
+  - {name: full_ce}
+  - {name: morph, batch_size: 1}
+  - {name: morph, batch_size: 1, prior: calibrated}
+  - {name: morph_topb, batch_size: 2, prior: calibrated}
+  - {name: morph_topb, batch_size: 4, prior: calibrated}
+  - {name: morph_topb, batch_size: 8, prior: calibrated}
+  - {name: morph_kb, batch_size: 2, prior: calibrated}
+  - {name: morph_kb, batch_size: 4, prior: calibrated}
+  - {name: morph_kb, batch_size: 8, prior: calibrated}
+  - {name: morph_random_boundary, batch_size: 4, prior: calibrated}

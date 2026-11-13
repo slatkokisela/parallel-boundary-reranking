@@ -21,6 +21,7 @@ class QueryContext:
     mips: np.ndarray        # (N,) inner products, descending
     emb_is_corpus: bool = False   # share one corpus matrix across contexts (memory)
     rank_prior: np.ndarray | None = None  # calibrated prior by MIPS rank, fit on other queries
+    emb_idx: np.ndarray | None = None     # rows of `emb` for the pool docs (default: doc_idx)
 
     @property
     def n(self) -> int:
@@ -29,15 +30,19 @@ class QueryContext:
     @property
     def doc_emb(self) -> np.ndarray:
         """(N, d) unit-norm pool embeddings in pool order."""
-        return self.emb[self.doc_idx] if self.emb_is_corpus else self.emb
+        if not self.emb_is_corpus:
+            return self.emb
+        return self.emb[self.doc_idx if self.emb_idx is None else self.emb_idx]
 
 
 class DenseRetriever:
     def __init__(self, model_name: str, query_prefix: str = "", doc_prefix: str = "",
-                 batch_size: int = 64, device: str | None = None):
+                 batch_size: int = 64, device: str | None = None, fp16: bool = False):
         from sentence_transformers import SentenceTransformer
         self.model_name = model_name
         self.model = SentenceTransformer(model_name, device=device)
+        if fp16 and str(self.model.device).startswith("cuda"):
+            self.model.half()
         self.qp, self.dp, self.bs = query_prefix, doc_prefix, batch_size
 
     def _enc(self, texts: list[str]) -> np.ndarray:

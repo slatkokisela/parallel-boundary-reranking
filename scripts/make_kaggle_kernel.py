@@ -78,6 +78,11 @@ env = dict(os.environ, PYTHONPATH="src", CUDA_VISIBLE_DEVICES="0")
 code = subprocess.run(COMMAND, shell=True, env=env).returncode
 os.makedirs("results", exist_ok=True)
 shutil.make_archive(W + "/results", "zip", P, "results")
+if os.path.isdir("cache"):              # ship caches, minus full-corpus embeddings (large; pools suffice)
+    for f in os.listdir("cache"):
+        if f.startswith("emb_"):
+            os.remove(os.path.join("cache", f))
+    shutil.make_archive(W + "/cache", "zip", P, "cache")
 print("DONE exit", code, flush=True)
 sys.exit(code)
 '''

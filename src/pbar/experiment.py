@@ -15,7 +15,7 @@ import yaml
 from . import calibration, data, metrics, selectors, stats
 from .crossencoder import CEScorer, score_pools
 from .oracle import CachedOracle
-from .retrieval import DenseRetriever, build_pools
+from .retrieval import DenseRetriever, QueryContext, build_pools
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ def config_hash(cfg: dict) -> str:
 
 def prepare(cfg: dict):
     """Load the dataset, build the candidate pools and the CE score cache for the configured split."""
-    ds = data.load(cfg["dataset"]["name"], cfg["dataset"]["data_dir"])
+    ds = data.load(cfg["dataset"]["name"], cfg["dataset"]["data_dir"], cfg["dataset"].get("split_scheme"))
     qids = ds.split_qids(cfg["split"])
     if cfg.get("max_queries"):
         qids = qids[: cfg["max_queries"]]
@@ -47,15 +47,31 @@ def prepare(cfg: dict):
     def retriever():  # loaded lazily; with warm caches no model is loaded at all
         if not _retr:
             _retr.append(DenseRetriever(rc["model"], rc.get("query_prefix", ""),
-                                        rc.get("doc_prefix", ""), rc.get("batch_size", 64)))
+                                        rc.get("doc_prefix", ""), rc.get("batch_size", 64),
+                                        fp16=bool(rc.get("fp16", False))))
         return _retr[0]
 
-    emb_path = cache / f"emb_{ds.name}_{_slug(rc['model'])}.npy"
-    corpus_emb = np.load(emb_path) if emb_path.exists() else \
-        retriever().encode_corpus(ds.doc_texts, emb_path)
-    assert corpus_emb.shape[0] == len(ds.doc_ids), "stale corpus embedding cache"
-    q_emb = _query_embeddings(retriever, ds, qids, cache / f"qemb_{ds.name}_{_slug(rc['model'])}.npz")
-    ctxs = build_pools(qids, ds.queries, q_emb, corpus_emb, cfg["pool_size"])
+    tag = f"{_slug(rc['model'])}{'_fp16' if rc.get('fp16') else ''}"
+    emb_path = cache / f"emb_{ds.name}_{tag}.npy"
+    qemb_path = cache / f"qemb_{ds.name}_{tag}.npz"
+
+    def corpus_emb():
+        e = np.load(emb_path) if emb_path.exists() else retriever().encode_corpus(ds.doc_texts, emb_path)
+        assert e.shape[0] == len(ds.doc_ids), "stale corpus embedding cache"
+        return e
+
+    pc = cfg.get("pool_cache")
+    if pc:   # large corpora: ship only pool-level data (see build_pool_cache)
+        assert pc["n"] >= cfg["pool_size"], "pool cache smaller than pool_size"
+        pool_path = cache / f"pools_{ds.name}_{tag}_N{pc['n']}.npz"
+        if not pool_path.exists():
+            all_q = sorted({q for sp in ds.qrels for q in ds.split_qids(sp)})
+            build_pool_cache(pool_path, all_q, ds, _query_embeddings(retriever, ds, all_q, qemb_path),
+                             corpus_emb(), pc["n"])
+        ctxs = load_pool_cache(pool_path, qids, ds.queries, cfg["pool_size"])
+    else:
+        q_emb = _query_embeddings(retriever, ds, qids, qemb_path)
+        ctxs = build_pools(qids, ds.queries, q_emb, corpus_emb(), cfg["pool_size"])
     fp16 = bool(cc.get("fp16", False))
     ce_path = cache / (f"ce_{ds.name}_{cfg['split']}_{_slug(cc['model'])}_L{cc.get('max_length', 512)}"
                        f"{'_fp16' if fp16 else ''}.npz")
@@ -63,6 +79,28 @@ def prepare(cfg: dict):
                                       fp16=fp16),
                      ctxs, ds.doc_texts, ce_path)
     return ds, ctxs, ce
+
+
+def build_pool_cache(path: Path, qids, ds, q_emb, corpus_emb, n: int) -> None:
+    """Top-n pools for all qids, plus embeddings of only the docs that occur in some pool (fp16)."""
+    ctxs = build_pools(qids, ds.queries, q_emb, corpus_emb, n)
+    uniq = np.unique(np.concatenate([c.doc_idx for c in ctxs]))
+    row = {int(d): i for i, d in enumerate(uniq)}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(path, qids=np.array(qids), doc_idx=np.stack([c.doc_idx for c in ctxs]),
+             mips=np.stack([c.mips for c in ctxs]), q_emb=np.asarray(q_emb, dtype=np.float32),
+             uniq=uniq, uniq_emb=corpus_emb[uniq].astype(np.float16),
+             pos=np.array([[row[int(d)] for d in c.doc_idx] for c in ctxs]))
+
+
+def load_pool_cache(path: Path, qids, queries, n: int):
+    with np.load(path, allow_pickle=False) as z:
+        index = {q: i for i, q in enumerate(z["qids"].tolist())}
+        emb = z["uniq_emb"].astype(np.float32)
+        emb /= np.linalg.norm(emb, axis=1, keepdims=True)    # re-normalise after fp16 storage
+        doc_idx, mips, q_emb, pos = z["doc_idx"], z["mips"], z["q_emb"], z["pos"]
+    return [QueryContext(q, queries[q], doc_idx[index[q], :n], emb, q_emb[index[q]], mips[index[q], :n],
+                         emb_is_corpus=True, emb_idx=pos[index[q], :n]) for q in qids]
 
 
 def _query_embeddings(retriever, ds, qids, path: Path) -> np.ndarray:
@@ -137,7 +175,9 @@ def run(cfg: dict, workers: int = 1) -> pd.DataFrame:
         for B in (ev["budgets"] if uses_budget else [None]):
             for k in ev["k"]:
                 jobs.append((m["name"], params, B, k))
-    init_args = (ds, ctxs, ce, qrels, ev.get("ndcg_k", 10))
+    import dataclasses
+    light = dataclasses.replace(ds, doc_texts=[])           # workers never need document texts
+    init_args = (light, ctxs, ce, qrels, ev.get("ndcg_k", 10))
     if workers > 1:
         import os
         from concurrent.futures import ProcessPoolExecutor
