@@ -185,7 +185,8 @@ def run(cfg: dict) -> pd.DataFrame:
     cfg["_hash"] = config_hash(cfg)
     # calibrated priors are fitted on the full split (cross-fit), then the timed subset is taken
     from .experiment import attach_rank_priors
-    full_cfg = dict(cfg, max_queries=None)
+    crossfit = cfg.get("calibration", {}).get("mode", "crossfit") == "crossfit"
+    full_cfg = dict(cfg, max_queries=None) if crossfit else cfg
     ds, ctxs, ce = prepare(full_cfg)
     ctxs, calib_info = attach_rank_priors(full_cfg, ctxs, ce)
     if cfg.get("max_queries"):
@@ -230,7 +231,9 @@ def run(cfg: dict) -> pd.DataFrame:
     meta = {"config": cfg, "torch": torch.__version__, "num_threads": torch.get_num_threads(),
             "cpu": platform.processor(), "platform": platform.platform(),
             "python": platform.python_version(), "max_length": cc.get("max_length", 512),
-            "cuda": torch.cuda.is_available(), "n_queries": len(ctxs)}
+            "cuda": torch.cuda.is_available(), "n_queries": len(ctxs),
+            "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+            "calibration": calib_info}
     (out / "meta.json").write_text(json.dumps(meta, indent=2, default=str))
     log.info("wrote %s", out)
     return summary

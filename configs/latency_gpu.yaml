@@ -1,0 +1,38 @@
+# M4b: live GPU latency (Kaggle T4). Same methods as the CPU run. Dev split only; latency does not touch test labels.
+name: latency_gpu_dev
+seed: 0
+split: dev
+max_queries: 30
+dataset: {name: nfcorpus, data_dir: data/raw}
+cache_dir: cache
+results_dir: results
+pool_size: 1000          # must match the quality runs so the CE cache is reused
+retriever:
+  model: intfloat/e5-base-v2
+  query_prefix: "query: "
+  doc_prefix: "passage: "
+  batch_size: 64
+cross_encoder:
+  model: cross-encoder/ms-marco-MiniLM-L-6-v2
+  max_length: 512
+  batch_size: 32
+latency:
+  num_threads: 4
+  warmup_queries: 3       # run all jobs once on these first, discard
+  repeats: 3              # median over repeats per (query, job)
+  k: 50
+  budgets: [25, 50]
+  microbench:
+    batch_sizes: [1, 2, 4, 8, 16, 32, 64]
+    n_docs: 64
+    repeats: 5
+    n_queries: 3
+calibration: {mode: file, path: cache/rank_prior_latency_dev.npz}   # cross-fitted locally on full dev
+methods:
+  - {name: single_stage}                  # all B docs in one batch (1 round)
+  - {name: single_stage, batch_size: 1}   # B sequential single-doc calls
+  - {name: morph, batch_size: 1, prior: calibrated}       # sequential BoundaryMORPH
+  - {name: morph_kb, batch_size: 2, prior: calibrated}
+  - {name: morph_kb, batch_size: 4, prior: calibrated}
+  - {name: morph_kb, batch_size: 8, prior: calibrated}
+  - {name: morph_topb, batch_size: 8, prior: calibrated}

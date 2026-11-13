@@ -66,6 +66,22 @@ if any(codes):
     sys.exit(1)
 '''
 
+COMMAND_RUNNER = r'''
+import base64, io, json, os, shutil, subprocess, sys, time, zipfile
+P = "/kaggle/temp_pbar"; W = "/kaggle/working"
+zipfile.ZipFile(io.BytesIO(base64.b64decode(BUNDLE))).extractall(P)
+os.chdir(P)
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "sentence-transformers==6.3.0"])
+import torch
+print({"torch": torch.__version__, "gpus": [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]}, flush=True)
+env = dict(os.environ, PYTHONPATH="src", CUDA_VISIBLE_DEVICES="0")
+code = subprocess.run(COMMAND, shell=True, env=env).returncode
+os.makedirs("results", exist_ok=True)
+shutil.make_archive(W + "/results", "zip", P, "results")
+print("DONE exit", code, flush=True)
+sys.exit(code)
+'''
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -77,6 +93,10 @@ def main():
     ap.add_argument("--fp16", action="store_true")
     ap.add_argument("--pool-size", type=int, default=1010)
     ap.add_argument("--batch-size", type=int, default=64)
+    ap.add_argument("--command", help="instead of precompute: run this shell command in the repo "
+                    "on GPU 0 and ship results/ as results.zip")
+    ap.add_argument("--extra-root", help="directory whose files are bundled at their relative paths "
+                    "(e.g. a folder containing cache/...)")
     a = ap.parse_args()
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -84,9 +104,18 @@ def main():
             for p in pathlib.Path(".").glob(pat):
                 if "__pycache__" not in p.parts:
                     z.write(p, p.as_posix())
+        if a.extra_root:
+            root = pathlib.Path(a.extra_root)
+            for p in root.rglob("*"):
+                if p.is_file():
+                    z.write(p, p.relative_to(root).as_posix())
     spec = dict(splits=a.splits, gpu0=a.gpu0, gpu1=a.gpu1, fp16=a.fp16, pool_size=a.pool_size,
                 batch_size=a.batch_size)
-    code = (f"BUNDLE = {base64.b64encode(buf.getvalue()).decode()!r}\nSPEC = {spec!r}\n" + RUNNER)
+    b64 = base64.b64encode(buf.getvalue()).decode()
+    if a.command:
+        code = f"BUNDLE = {b64!r}\nCOMMAND = {a.command!r}\n" + COMMAND_RUNNER
+    else:
+        code = f"BUNDLE = {b64!r}\nSPEC = {spec!r}\n" + RUNNER
     out = pathlib.Path(a.out_dir)
     out.mkdir(parents=True, exist_ok=True)
     slug = a.kernel_id.split("/")[1]

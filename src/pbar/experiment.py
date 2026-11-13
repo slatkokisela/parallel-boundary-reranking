@@ -173,6 +173,7 @@ def run(cfg: dict, workers: int = 1) -> pd.DataFrame:
 def attach_rank_priors(cfg, ctxs, ce):
     """Attach calibrated rank priors if any method uses prior='calibrated'.
 
+    calibration.mode = "file": load per-qid curves from `path` (npz keyed by qid);
     calibration.mode = "crossfit" (default): K query folds within this split, each fitted on
                        the other folds;
                      = "split": fit on all queries of `fit_split` (e.g. dev) for a test run.
@@ -186,6 +187,9 @@ def attach_rank_priors(cfg, ctxs, ce):
         assert len(ctxs) >= 2 * cal.get("folds", 2), "too few queries to cross-fit"
         curves = calibration.crossfit_curves({c.qid: ce[c.qid] for c in ctxs}, n,
                                              cal.get("folds", 2), cfg.get("seed", 0))
+    elif cal["mode"] == "file":     # precomputed per-qid curves (e.g. shipped to a remote GPU run)
+        with np.load(cal["path"]) as z:
+            curves = {c.qid: z[c.qid] for c in ctxs}
     elif cal["mode"] == "split":
         assert cal["fit_split"] != cfg["split"], "fit split must differ from eval split"
         fcfg = dict(cfg, split=cal["fit_split"], max_queries=None)
