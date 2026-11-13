@@ -50,7 +50,7 @@ scores and ranks, never qrels.
 
 * Max-σ with the calibrated prior is now flat (74.7 / 74.9 / 75.2 at k=20). It no longer collapses.
 * Human nCG at k=20: calibrated MORPH 34.9 / 35.8 / 36.1 (B = 10/25/50) vs MIPS 34.3 and
-  Full-CE 33.7. Combining the retrieval prior with sparse CE evidence beats either alone here.
+  Full-CE 33.7 on dev. **This did not replicate on test (see F8): treat it as dev noise.**
   At k=100, all CE-based methods stay ≤ MIPS (F1).
 
 ## F5. Batch selection costs no measurable quality (same run)
@@ -106,6 +106,31 @@ median over 2 repeats. Per-query median wall-clock (s):
   batched CE throughput scales (GPU or a remote CE service). Next step: rerun this harness
   on a Kaggle T4.
 
+## F8. TEST split, frozen config, run once (`results/final_test_8b63c00e50`)
+
+Config `configs/final_test.yaml`, chosen on dev. 323 test queries. Calibrated prior fit on
+**dev only** (`calibration: {mode: split, fit_split: dev}`). Reference: calibrated sequential MORPH.
+
+**Replicated from dev:**
+* **Batching is quality-neutral.** Top-b and KB at b ∈ {2,4,8} vs sequential: CE-nCG |Δ| ≤ 0.89 pp
+  (widest CI [−1.59, 1.25]). Human nCG |Δ| ≤ 0.87 pp, **0 of 54 significant** (Holm).
+* **The acquisition rule matters.** Random-boundary control: CE-nCG −4.0 to −9.2 pp (9/9 significant).
+* **Boundary selection improves CE-set fidelity over MIPS** (calibrated MORPH − MIPS, CE-nCG):
+  k=20: +3.4 / +7.6 / +10.0 pp (B = 10/25/50); k=50: +0.4 / +2.5 / +4.7; k=100: −0.2 / +0.2 / +1.5.
+  The CIs exclude 0 except at k=50, B=10 and at k=100, B ≤ 25.
+* **Calibrated vs paper prior:** calibrated is better at k=20 with small B (paper prior −2.5 pp
+  at B=10, −1.1 pp at B=25, both significant). Elsewhere the two are within ~±1.8 pp; the paper
+  prior is nominally ahead at k=20, B=50 (+1.8, not significant).
+
+**Not replicated (corrects F4):** on human labels, calibrated MORPH vs MIPS is
+**−0.7 to +0.7 pp, with every 95% CI including 0** (k ∈ {20,50,100}, B ∈ {10,25,50}). The dev
+gain at k=20 (+1.8 pp) did not hold up on test. With this CE (F1), better CE-set fidelity does
+not turn into better human-judged relevance on NFCorpus.
+
+Statistics note (again): Wilcoxon gives p < 1e-10 for some cells whose bootstrap CI of the mean
+includes 0 (e.g. CE-nCG k=50, B=10). The per-query differences are heavily tied and skewed,
+so we report the bootstrap CI of the mean as the primary evidence.
+
 ## Resume here (next session)
 
 ```bash
@@ -114,7 +139,7 @@ median over 2 repeats. Per-query median wall-clock (s):
 .venv-pbar/Scripts/kaggle kernels output bojanabiga/pbar-ce-pilot -p dl/ && python -I -c "import zipfile; zipfile.ZipFile('dl/cache.zip').extractall('.')"
 #    Compare Full-CE vs MIPS nCG on dev per CE (configs/baselines.yaml with cross_encoder.model
 #    and fp16: true). Pick a CE on DEV only. If one is chosen, its test scores need another Kaggle run.
-# 2. Frozen test run (once; calibration fitted on dev):
+# 2. Frozen test run: DONE 2026-11-12 (F8). Do not re-run with changed settings.
 .venv-pbar/Scripts/python.exe scripts/run.py configs/final_test.yaml --workers 4
 .venv-pbar/Scripts/python.exe scripts/analyze.py results/final_test_<hash> --metric ce_ncg --ref 'morph|{"batch_size": 1, "prior": "calibrated"}'
 ```

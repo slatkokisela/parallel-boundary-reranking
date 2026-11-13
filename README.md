@@ -36,8 +36,9 @@ bootstrap 95% CIs, all queries and the ≥20-relevant "diffuse" subset), and `me
 - [x] M1: MIPS / SingleStage / Full-CE baselines (dev)
 - [x] M2: sequential BoundaryMORPH (paper Alg. 1/2), plus the paper's ablations
 - [x] M3: batch variants (top-b, kriging believer/liar, random-boundary control) and a calibrated-prior extension (dev)
-- [ ] M4: live CPU latency (running)
-- [ ] M5: test-split confirmation and analysis
+- [x] M4: live CPU latency (F6, F7)
+- [x] M5a: test-split confirmation (docs/FINDINGS.md F8)
+- [ ] M5b: CE pilot, GPU latency, final write-up
 
 ## Results
 
