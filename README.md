@@ -38,7 +38,8 @@ bootstrap 95% CIs, all queries and the ≥20-relevant "diffuse" subset), and `me
 - [x] M3: batch variants (top-b, kriging believer/liar, random-boundary control) and a calibrated-prior extension (dev)
 - [x] M4: live CPU latency (F6, F7)
 - [x] M5a: test-split confirmation (docs/FINDINGS.md F8)
-- [ ] M5b: CE pilot, GPU latency, final write-up
+- [x] M5b: CE pilot (F9: no CE beats e5 on deep NFCorpus pools; kept MiniLM-L-6)
+- [ ] M6: GPU latency rerun; second dataset where the CE beats the retriever
 
 ## Results
 

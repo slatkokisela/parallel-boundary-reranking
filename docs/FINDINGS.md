@@ -131,6 +131,38 @@ Statistics note (again): Wilcoxon gives p < 1e-10 for some cells whose bootstrap
 includes 0 (e.g. CE-nCG k=50, B=10). The per-query differences are heavily tied and skewed,
 so we report the bootstrap CI of the mean as the primary evidence.
 
+## F9. CE pilot: no available CE beats the dense retriever on a deep NFCorpus pool (dev)
+
+Selection on DEV only (`scripts/compare_ce.py`). CEs were scored on a Kaggle T4 (MiniLM-L-6 in fp32,
+the others in fp16, max_length 512, the same e5 pools).
+
+Full-CE (rank the entire 1000-doc pool by CE) minus MIPS, human nCG, paired 95% CI:
+
+| CE | k=20 | k=50 | k=100 | CE score median / share > 0.5 |
+|---|---|---|---|---|
+| ms-marco-MiniLM-L-6-v2 | −0.6 [−2.5, +1.4] | −2.4 [−4.3, −0.5] | −3.3 [−5.5, −1.0] | 3e-5 / 0.3% |
+| ms-marco-MiniLM-L-12-v2 | −6.2 [−8.6, −3.9] | −6.8 [−9.1, −4.5] | −6.7 [−9.1, −4.3] | 4e-5 / 1.8% |
+| bge-reranker-base | −6.1 [−8.4, −3.8] | −6.0 [−8.4, −3.4] | −5.5 [−8.4, −2.6] | 4e-4 / 0.5% |
+| bge-reranker-v2-m3 | −4.6 [−6.7, −2.5] | −4.6 [−6.7, −2.6] | −4.7 [−7.1, −2.5] | 7e-4 / 0.9% |
+
+Sanity check that the scores are valid: rerank only the MIPS top-`depth`, nDCG@10 vs MIPS (32.8):
+
+| CE | depth 20 | depth 100 | depth 1000 |
+|---|---|---|---|
+| MiniLM-L-6 | +0.8 [−0.4, +2.0] | +0.4 [−1.1, +1.8] | −0.1 [−1.6, +1.5] |
+| MiniLM-L-12 | +0.3 [−0.9, +1.6] | −1.4 [−3.1, +0.1] | −6.0 [−8.1, −4.1] |
+| bge-reranker-base | −0.2 [−1.5, +1.1] | −3.0 [−4.7, −1.3] | −6.2 [−8.4, −4.1] |
+| bge-reranker-v2-m3 | **+1.4 [+0.1, +2.8]** | −0.3 [−1.9, +1.3] | −3.0 [−4.8, −1.2] |
+
+Interpretation: shallow reranking behaves as expected (small or no gains, as is typical on
+NFCorpus with a strong dense retriever). Deeper pools let CE false positives in. On a
+1000-doc pool every CE is a *worse* relevance signal than e5. Every CE's scores are also
+heavily skewed (median ≪ 0.01), so the calibration issue (F3) is general, not specific to MiniLM.
+**Decision (made on dev): keep MiniLM-L-6.** It is the least harmful on deep pools and the cheapest,
+so the test results (F8) stand as the main condition. The open question "do CE-fidelity gains
+become human-label gains when the CE is better than the retriever?" cannot be answered on
+NFCorpus. It needs a dataset where reranking clearly helps (e.g. SciFact or TREC-COVID).
+
 ## Resume here (next session)
 
 ```bash
